@@ -933,10 +933,18 @@ exports.LoadUtils = () => {
 
     window.WWebJS.getChats = async () => {
         const chats = window.require('WAWebCollections').Chat.getModelsArray();
-        const chatPromises = chats.map((chat) =>
-            window.WWebJS.getChatModel(chat),
-        );
-        return await Promise.all(chatPromises);
+
+        // Process each chat individually — one failure should not discard every chat
+        const results = [];
+        for (const chat of chats) {
+            try {
+                const model = await window.WWebJS.getChatModel(chat);
+                if (model) results.push(model);
+            } catch {
+                // skip chats that fail serialization (e.g. LID-based group metadata issues)
+            }
+        }
+        return results;
     };
 
     window.WWebJS.getChannels = async () => {
@@ -971,7 +979,12 @@ exports.LoadUtils = () => {
             const groupMetadata =
                 window.require('WAWebCollections').GroupMetadata ||
                 window.require('WAWebCollections').WAWebGroupMetadataCollection;
-            await groupMetadata.update(chatWid);
+            try {
+                await groupMetadata.update(chatWid);
+            } catch {
+                // LID-based chat IDs may not be found in IndexedDB — skip group metadata
+                model.groupMetadata = null;
+            }
             const { toPn } = window.require('WAWebLidMigrationUtils');
             const serializedMetadata = chat.groupMetadata.serialize();
             for (const p of serializedMetadata.participants || []) {
